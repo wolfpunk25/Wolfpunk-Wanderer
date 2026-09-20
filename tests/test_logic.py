@@ -87,6 +87,26 @@ for p in PARAMS:
 
 check("clamp() basic sanity", clamp(5, 0, 10) == 5 and clamp(-1, 0, 10) == 0 and clamp(11, 0, 10) == 10)
 
+# -- params: half a turn from the centered default should land within 10%
+# of an extreme, and a full turn should reach it outright (the requested
+# "hold and twist" responsiveness fix - previously MOD WHEEL needed ~3.5
+# turns for the full range). ~18 encoder counts/turn measured on this
+# board, so half a turn is ~9 counts. TRANSPOSE is deliberately excluded -
+# it keeps 1-semitone-precise stepping instead of a fast sweep.
+HALF_TURN_DETENTS = 9
+FULL_TURN_DETENTS = HALF_TURN_DETENTS * 2
+for p in PARAMS:
+    if p.kind == "transpose":
+        continue
+    span = p.maxv - p.minv
+    tolerance = span * 0.1
+    lo_half = step_value(p, p.default, -HALF_TURN_DETENTS)
+    hi_half = step_value(p, p.default, HALF_TURN_DETENTS)
+    check(f"{p.name}: half turn down nears the bottom", lo_half - p.minv <= tolerance)
+    check(f"{p.name}: half turn up nears the top", p.maxv - hi_half <= tolerance)
+    check(f"{p.name}: full turn down reaches the bottom", step_value(p, p.default, -FULL_TURN_DETENTS) == p.minv)
+    check(f"{p.name}: full turn up reaches the top", step_value(p, p.default, FULL_TURN_DETENTS) == p.maxv)
+
 if failures:
     print(f"\n{len(failures)} check(s) failed")
     sys.exit(1)

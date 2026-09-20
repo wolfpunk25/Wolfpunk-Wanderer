@@ -7,6 +7,16 @@
 #   "pitchbend" - the dedicated Pitch Bend message, not a CC at all
 #   "transpose" - not sent over MIDI at all; shifts the note bank locally
 #                 (see notes.bank_notes' transpose argument)
+#
+# `step` is tuned so a full turn of this board's encoder covers roughly the
+# whole range - measured empirically (MOD WHEEL at the old step of 2 took
+# ~3.5 turns bottom to top, i.e. ~18 encoder counts/turn), not read off a
+# datasheet. `default` is the centre of the range wherever "centre" makes
+# sense, so turning either direction from boot has room to move, and a half
+# turn from the default lands near an extreme. TRANSPOSE is the one
+# exception left at 1 semitone/detent - it's a discrete musical value, not
+# a continuous CC, and 3+ semitone jumps would skip notes you'd want to
+# land on exactly.
 
 
 class Param:
@@ -26,15 +36,15 @@ def clamp(v, lo, hi):
 
 
 PARAMS = [
-    Param("MOD WHEEL",      "cc",        1,  0,     127,   0,   2,   (0, 150, 255)),
-    Param("FILTER CUTOFF",  "cc",        74, 0,     127,   64,  2,   (255, 120, 0)),
-    Param("RESONANCE",      "cc",        71, 0,     127,   0,   2,   (255, 0, 150)),
-    Param("ATTACK",         "cc",        73, 0,     127,   0,   2,   (0, 255, 100)),
-    Param("RELEASE",        "cc",        72, 0,     127,   20,  2,   (100, 255, 0)),
-    Param("PORTAMENTO",     "cc",        5,  0,     127,   0,   2,   (150, 0, 255)),
-    Param("PITCH BEND",     "pitchbend", None, -8192, 8191, 0,   256, (255, 255, 0)),
+    Param("MOD WHEEL",      "cc",        1,  0,     127,   64,  7,   (0, 150, 255)),
+    Param("FILTER CUTOFF",  "cc",        74, 0,     127,   64,  7,   (255, 120, 0)),
+    Param("RESONANCE",      "cc",        71, 0,     127,   64,  7,   (255, 0, 150)),
+    Param("ATTACK",         "cc",        73, 0,     127,   64,  7,   (0, 255, 100)),
+    Param("RELEASE",        "cc",        72, 0,     127,   64,  7,   (100, 255, 0)),
+    Param("PORTAMENTO",     "cc",        5,  0,     127,   64,  7,   (150, 0, 255)),
+    Param("PITCH BEND",     "pitchbend", None, -8192, 8191, 0,   896, (255, 255, 0)),
     Param("TRANSPOSE",      "transpose", None, -24,  24,   0,   1,   (255, 255, 255)),
-    Param("REVERB SEND",    "cc",        91, 0,     127,   0,   2,   (0, 200, 200)),
+    Param("REVERB SEND",    "cc",        91, 0,     127,   64,  7,   (0, 200, 200)),
 ]
 
 

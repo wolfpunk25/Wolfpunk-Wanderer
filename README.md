@@ -71,6 +71,17 @@ time - whichever you pressed first owns the encoder until you let it go;
 pressing a second one while the first is still held does nothing until
 the first is released.
 
+All seven CC parameters (everything but Transpose) **start centred at 64**
+rather than at 0, and a full turn of the encoder covers roughly the whole
+0-127 range - half a turn from the default gets you close to either
+extreme, a full turn reaches it outright. Pitch Bend follows the same
+feel, centred at 0 across its -8192..8191 range. This was tuned from a
+measurement, not a spec sheet (see `wolfpunk/params.py`'s comment), so if
+it's still too twitchy or too slow, `step` there is the one number to
+adjust. Transpose is the one exception kept at 1 semitone per detent -
+it's a discrete musical value, and coarser stepping would skip notes you'd
+want to land on exactly.
+
 Pitch Bend and Transpose behave like the other seven (settable and
 sticky, not spring-back-to-center) rather than simulating a real pitch
 wheel, so all nine parameters share one consistent gesture. If you'd
@@ -146,7 +157,11 @@ hardware was involved: the scale table borrowed from Wolfpunk Possibility
 had a `WholeTone` entry padded to 7 slots by repeating the octave note,
 which produced two identical notes wherever a sliding window crossed that
 seam - harmless in Possibility's triad-picking code, not harmless here.
-Swapped for Harmonic Minor, a genuine 7-note scale.
+Swapped for Harmonic Minor, a genuine 7-note scale. Also checks that half
+a turn of the encoder from each CC/Pitch Bend parameter's centred default
+lands within 10% of an extreme and a full turn reaches it outright - the
+"hold and twist" responsiveness tuned from a real measurement (see
+`wolfpunk/params.py`).
 
 ## Design choices worth knowing about
 
