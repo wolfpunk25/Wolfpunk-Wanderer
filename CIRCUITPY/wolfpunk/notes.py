@@ -1,26 +1,31 @@
-# The sliding "note bank" behind the top-row keys: keys 0-2 always sound
-# three *consecutive* scale degrees, and the encoder slides that window of
-# three up or down the scale (a "bank" isn't a jump to an unrelated triad,
-# it's the same three-note window moving by one degree at a time).
+# The note pool: a set of scale degrees that only grows (via the encoder
+# or keys 0-2) until something explicitly empties it (a key toggling its
+# own degree off, or a long-press clear). Replaces an earlier sliding
+# "3-note window" design that swapped notes out from under a held chord
+# every time the encoder turned - see README.md's Design choices.
 
 from wolfpunk.scales import midi_note
 
-BANK_MIN = -14  # two octaves below the root's degree
-BANK_MAX = 14   # two octaves above
+KEY_DEGREES = (0, 1, 2)  # fixed scale degrees keys 0, 1, 2 each toggle
 
 
 def clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
 
 
-def clamp_bank_offset(offset):
-    return clamp(offset, BANK_MIN, BANK_MAX)
+def degree_to_midi(root_index, scale_name, degree, transpose=0):
+    n = midi_note(root_index, scale_name, degree) + transpose
+    return int(clamp(n, 0, 127))
 
 
-def bank_notes(root_index, scale_name, bank_offset, transpose=0):
-    """The 3 MIDI notes currently under keys 0, 1, 2."""
-    notes = []
-    for i in range(3):
-        n = midi_note(root_index, scale_name, bank_offset + i) + transpose
-        notes.append(int(clamp(n, 0, 127)))
-    return notes
+def next_degree_to_add(active_degrees, direction):
+    """Which degree the encoder should add next, growing the pool
+    outward: right extends above the current highest note, left extends
+    below the current lowest. An empty pool seeds at the root (degree 0)
+    regardless of direction, so there's always a predictable starting
+    point."""
+    if not active_degrees:
+        return 0
+    if direction > 0:
+        return max(active_degrees) + 1
+    return min(active_degrees) - 1

@@ -2,9 +2,10 @@
 
 A MIDI note/CC manipulator for the
 [Adafruit MacroPad RP2040](https://www.adafruit.com/product/5128): three
-keys sound a sliding window of notes from a scale, the other nine each own
-one live-adjustable MIDI parameter, and the encoder either slides the note
-window or (held) changes scale. USB MIDI out, general-purpose enough to
+keys each toggle a note into a growing polyphonic pool, the encoder grows
+that pool further, and once 2+ notes are active they auto-arpeggiate
+instead of holding as a static chord. The other nine keys each own one
+live-adjustable MIDI parameter. USB MIDI out, general-purpose enough to
 drive any synth - not tied to one instrument's CC map.
 
 Third instrument on this board, after
@@ -20,7 +21,7 @@ does use the speaker once, for a two-tone startup chime.
 ## Controls
 
 ```
- [ N1  ][ N2  ][ N3  ]   <- note toggles, sliding scale window
+ [ N1  ][ N2  ][ N3  ]   <- note pool toggles (degrees 0, 1, 2)
  [MOD W][FILTR][ RES ]
  [ ATK ][ REL ][PORTA]
  [ BEND][TRNSP][REVRB]
@@ -28,26 +29,37 @@ does use the speaker once, for a two-tone startup chime.
         (ENCODER)
 ```
 
-**Top row (keys 0-2) - note toggles.** Each press latches a note on;
-press again to release it. Together they always sound three *consecutive*
-scale degrees - not three independent notes you pick freely.
+**Top row (keys 0-2) - note pool toggles.** Each key owns one fixed scale
+degree (0, 1, 2 - never moves) and toggles it in/out of the "note pool".
+The pool only *grows* until something explicitly empties it - see below.
 
-**Encoder, rotated alone** - slides that three-note window up or down the
-scale one degree at a time ("rotating selects three more notes"). Any
-notes currently latched are released first, so a bank change can never
-leave a note stuck sounding a pitch no key still represents - re-press to
-sound the new window.
+**Encoder, rotated alone** - grows the pool: turning right adds the next
+scale degree above whatever's currently the highest active note; left
+adds the next one below. An empty pool seeds at the root either direction.
+Nothing already sounding is ever swapped out or interrupted by turning it
+- this replaced an earlier "sliding 3-note window" design that killed
+whatever was latched every time the encoder moved, which felt wrong in
+practice (see Design choices below).
 
 **Encoder, pressed and rotated** - cycles the scale (7 of them: Major,
-Minor, Dorian, Byzantine, Lydian, Mixolydian, Harmonic Minor).
+Minor, Dorian, Byzantine, Lydian, Mixolydian, Harmonic Minor). Existing
+pool degrees are recomputed against the new scale immediately, so a scale
+change retunes whatever's already playing rather than needing new notes.
 
-**Encoder, quick press with no rotation** - recenters the note window back
-to the root (a bonus "home" gesture, not part of the original spec - easy
-to repurpose in `handle_encoder_switch_up()` in `code.py` if you'd rather
-it did nothing).
+**Encoder, quick click (no rotation, not part of a double-click)** - tap
+tempo for the arpeggiator: tap it twice in time and the gap between taps
+sets the BPM.
 
-**Encoder, held 5 seconds** - panic: releases every latched note and sends
-MIDI All Notes Off (CC123), independent of whether you're also rotating it.
+**Encoder, double-click** - resets all 9 sound-manipulation parameters
+(rows 2-4) back to their defaults. Replaced the earlier "tap a
+manipulation key with no rotation resets it" behaviour, which was
+resetting things by accident whenever a key was pressed just to check it
+without meaning to change anything.
+
+**Encoder, held ~0.8 seconds** - clears the note pool entirely (and sends
+MIDI All Notes Off, CC123). This used to be a 5-second hold doing the same
+thing under the name "panic" - shortened once it got its own dedicated
+gesture instead of being a last-resort safety net.
 
 **Rows 2-4 (keys 3-11) - sound manipulation, one MIDI parameter each:**
 
@@ -60,16 +72,18 @@ MIDI All Notes Off (CC123), independent of whether you're also rotating it.
 | 8 | Release | CC72 |
 | 9 | Portamento | CC5 |
 | 10 | Pitch Bend | dedicated Pitch Bend message |
-| 11 | Transpose | local only - shifts the note window, sends nothing |
+| 11 | Transpose | local only - shifts the note pool, sends nothing |
 | 12 | Reverb Send | CC91 |
 
 **Hold one of these and twist the encoder** to adjust its value live -
 the screen shows the parameter name and a value bar, and its key LED
-brightens with the value. **A quick tap with no rotation resets it** to
-its default and sends that. Only one of the nine can be "active" at a
-time - whichever you pressed first owns the encoder until you let it go;
-pressing a second one while the first is still held does nothing until
-the first is released.
+brightens with the value. Letting go without turning it does nothing -
+the value stays wherever it was. Only one of the nine can be "active" at
+a time - whichever you pressed first owns the encoder until you let it
+go; pressing a second one while the first is still held does nothing
+until the first is released. (To reset a parameter, double-click the
+encoder - see above; it resets all nine at once rather than one at a
+time, since there's no longer a per-key gesture free to reset just one.)
 
 All seven CC parameters (everything but Transpose) **start centred at 64**
 rather than at 0, and a full turn of the encoder covers roughly the whole
@@ -88,21 +102,43 @@ wheel, so all nine parameters share one consistent gesture. If you'd
 rather Pitch Bend snapped back to center on release, that's a small change
 in `_manip_key_up()`.
 
+## Arpeggiator
+
+Whatever's in the note pool never sounds as a held chord - as soon as
+there's 1 or more notes active, the arpeggiator cycles through them one at
+a time (ascending pitch order, wrapping around), retriggering a note the
+instant it starts even with just one note active, so nothing plays as a
+sustained drone. Rate defaults to 120 BPM at 8th notes (`ArpClock(bpm=120,
+steps_per_beat=2)` in `code.py`); tap tempo (quick single clicks of the
+encoder) resets it live. Only the ascending pattern exists right now -
+`wolfpunk/arp.py`'s `next_up_index()` is the one function to extend for
+down/up-down/random patterns later.
+
+Notes added purely via the encoder (beyond the 3 keyed degrees) have no
+individual way to remove just that one note - only re-toggling one of
+keys 0-2, or a long-press clearing everything, changes the pool. That's a
+deliberate tradeoff of the "keys toggle, encoder only grows" model: fine
+detail in exchange for never accidentally losing what's already ringing
+when you reach for the encoder.
+
 ## LEDs
 
-- Note keys: lit in a scale-degree colour when latched, dim when not.
+- Note keys: each lit in its own fixed scale-degree colour (key 1's
+  colour never changes, unlike the old sliding-window design) - dim when
+  its degree isn't in the pool, brighter when it is, full brightness for
+  the one instant it's the arpeggiator's current step.
 - Manipulation keys: a fixed hue per parameter, brightness tracking its
   current value (always slightly lit, so you can tell keys apart even at
   their minimum) - full brightness while it's the one actively held.
-- Any flash (scale change, bank reset, panic, parameter reset) briefly
-  lights all twelve white.
+- Any flash (scale change, notes cleared, settings reset, tap-tempo BPM)
+  briefly lights all twelve white.
 
 ## Screen
 
-Idle: root + scale on line 1, the three current note names on line 2
-(the sounding ones marked with `*`), channel (or a flash message) on line
-3. Holding a manipulation key replaces this with that parameter's name,
-value, and a bar.
+Idle: root + scale on line 1, the current note pool (note names, low to
+high) on line 2 - "-- no notes --" when empty - BPM and channel (or a
+flash message) on line 3. Holding a manipulation key replaces this with
+that parameter's name, value, and a bar.
 
 ## Startup
 
@@ -117,7 +153,8 @@ CIRCUITPY/
   code.py            main loop: keys, encoder, MIDI, display/LED refresh
   wolfpunk/
     scales.py         7 scales, degree->MIDI note (handles negative degrees)
-    notes.py          the sliding 3-note bank window over a scale
+    notes.py          the growing note pool - which degree the encoder adds next
+    arp.py            the arpeggiator's step pattern and tap-tempo clock
     params.py         the 9 manipulation-key parameter definitions
     ui.py             OLED + NeoPixel rendering
 tools/install.sh      rsync CIRCUITPY/ onto the mounted board
@@ -148,31 +185,44 @@ pairing needed, this one's wired.
 ```
 
 Pure-Python, no board needed - checks every scale rises strictly across
-its 7 degrees (and wraps correctly on negative degrees), that a sliding
-3-note bank window always ascends and stays in 0-127 even at its
-clamped extremes, that transpose shifts the window by exactly the right
-amount and clamps rather than wraps, and that every parameter's default,
-normalization, and step-clamping behave. This caught a real bug before any
+its 7 degrees (and wraps correctly on negative degrees), that the note
+pool only ever extends outward and seeds at the root, that transpose
+shifts a note by exactly the right amount and clamps rather than wraps at
+the MIDI extremes, that the arpeggiator's step index cycles correctly
+however many notes are active (and never raises if the pool shrinks
+between steps), that tap-tempo's interval math clamps to a sane BPM range
+instead of exploding on a near-instant double-tap, and that every
+manipulation parameter's default, normalization, and step-clamping
+behave, including the "hold and twist" responsiveness tuned from a real
+measurement (see `wolfpunk/params.py`). Caught a real bug before any
 hardware was involved: the scale table borrowed from Wolfpunk Possibility
 had a `WholeTone` entry padded to 7 slots by repeating the octave note,
-which produced two identical notes wherever a sliding window crossed that
-seam - harmless in Possibility's triad-picking code, not harmless here.
-Swapped for Harmonic Minor, a genuine 7-note scale. Also checks that half
-a turn of the encoder from each CC/Pitch Bend parameter's centred default
-lands within 10% of an extreme and a full turn reaches it outright - the
-"hold and twist" responsiveness tuned from a real measurement (see
-`wolfpunk/params.py`).
+which produced duplicate-pitched degrees near the seam - harmless in
+Possibility's triad-picking code, would not have been harmless here.
+Swapped for Harmonic Minor, a genuine 7-note scale.
 
 ## Design choices worth knowing about
 
 - **Root is fixed at C.** Nothing in the request asked for a way to change
   it independently of Transpose, which already covers repitching the whole
-  window ±24 semitones. Easy to add a `ROOT` control later if wanted.
-- **Bank slides one degree at a time**, not in non-overlapping jumps of
-  three. "Rotating the encoder selects three more notes" was read as a
-  moving window rather than swapping to an unrelated triad - it's finer
-  control and every adjacent window overlaps the last by two notes.
-- **A bank change always releases whatever's latched**, rather than trying
-  to keep already-sounding notes ringing while the keys under them start
-  meaning something else. Simpler, and avoids the stuck-note class of bug
-  the sister LydianToggle box's diff-based sync exists to prevent.
+  pool ±24 semitones. Easy to add a `ROOT` control later if wanted.
+- **The note pool only grows, never gets rearranged.** An earlier design
+  had the encoder slide which 3 notes the top keys represented, releasing
+  whatever was latched every time it turned so nothing went stale. In
+  practice that felt wrong - turning the encoder while playing shouldn't
+  cut off what's sounding. Now keys 0-2 own one fixed degree each forever,
+  and the encoder only ever adds - removal is either untoggling one of
+  those 3 keys, or a long-press clearing everything. No gesture
+  rearranges what's already there out from under you.
+- **Arpeggiate always, not as a toggle.** "I'd like some kind of
+  arpeggiator rather than continuous notes" read as wanting to replace
+  static held chords outright, not add a mode switch for it - so there's
+  no separate ARP on/off control, the pool always cycles the moment it's
+  non-empty, even with just one note in it (a single repeated pulse
+  rather than a sustained tone).
+- **Encoder gestures got split up as they accumulated meaning.** What was
+  one 5-second "panic" hold is now two separate gestures once there was a
+  real distinction to make: a quick double-click for "reset settings"
+  (deliberate, not resettable by accident) and a much shorter ~0.8s long
+  press for "clear notes" (needs to be fast enough to use mid-performance,
+  not just as a last-resort safety net).

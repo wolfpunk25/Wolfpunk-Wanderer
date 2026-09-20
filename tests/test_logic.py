@@ -10,8 +10,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "CIRCUITPY"))
 
 from wolfpunk.scales import SCALE_NAMES, midi_note
-from wolfpunk.notes import bank_notes, clamp_bank_offset, BANK_MIN, BANK_MAX
+from wolfpunk.notes import degree_to_midi, next_degree_to_add
 from wolfpunk.params import PARAMS, normalized, step_value, clamp
+from wolfpunk.arp import bpm_from_tap_interval, step_interval_s, next_up_index
 
 failures = []
 
@@ -33,38 +34,56 @@ for name in SCALE_NAMES:
     n_6 = midi_note(0, name, 6)
     check(f"{name} degree -1 == degree 6 minus an octave", n_minus1 == n_6 - 12)
 
-# -- notes: a sliding bank window always yields 3 ascending-or-equal notes -
+# -- notes: degree_to_midi never leaves the 0-127 MIDI range, however far
+# the pool has grown ---------------------------------------------------
 for name in SCALE_NAMES:
-    for offset in range(BANK_MIN, BANK_MAX - 1):
-        notes = bank_notes(0, name, offset)
-        check(
-            f"{name} bank@{offset} strictly ascending",
-            notes[0] < notes[1] < notes[2],
-        )
+    for degree in (-40, -14, -1, 0, 1, 14, 40):
+        n = degree_to_midi(0, name, degree)
+        check(f"{name} degree {degree} in range", 0 <= n <= 127)
 
-# -- notes: bank window never leaves the 0-127 MIDI range ------------------
-for name in SCALE_NAMES:
-    for offset in (BANK_MIN, BANK_MAX):
-        for n in bank_notes(0, name, offset):
-            check(f"{name} bank@{offset} note {n} in range", 0 <= n <= 127)
+# -- notes: transpose shifts a note by exactly that many semitones, and
+# clamps rather than wraps at the extremes ---------------------------------
+base = degree_to_midi(0, "Major", 0, transpose=0)
+shifted = degree_to_midi(0, "Major", 0, transpose=5)
+check("transpose shifts a note by +5", shifted - base == 5)
+check("transpose clamps at the top", degree_to_midi(0, "Major", 40, transpose=999) == 127)
+check("transpose clamps at the bottom", degree_to_midi(0, "Major", -40, transpose=-999) == 0)
 
-# -- notes: transpose shifts the whole window by exactly that many semitones
-base = bank_notes(0, "Major", 0, transpose=0)
-shifted = bank_notes(0, "Major", 0, transpose=5)
-check(
-    "transpose shifts all 3 notes by +5",
-    all(s - b == 5 for b, s in zip(base, shifted)),
-)
+# -- notes: the growing pool only ever extends outward, seeds at the root,
+# and never revisits/removes a degree on its own -----------------------
+check("empty pool seeds at the root going up", next_degree_to_add(set(), 1) == 0)
+check("empty pool seeds at the root going down", next_degree_to_add(set(), -1) == 0)
+pool = set()
+for _ in range(5):
+    pool.add(next_degree_to_add(pool, 1))
+check("growing up 5 times reaches degree 4", pool == {0, 1, 2, 3, 4})
+pool = set()
+for _ in range(5):
+    pool.add(next_degree_to_add(pool, -1))
+check("growing down 5 times reaches degree -4", pool == {0, -1, -2, -3, -4})
+pool = {0, 1, 2}
+check("growing up from {0,1,2} adds 3, not a duplicate", next_degree_to_add(pool, 1) == 3)
+check("growing down from {0,1,2} adds -1, not a duplicate", next_degree_to_add(pool, -1) == -1)
 
-# -- notes: transpose clamps into range rather than wrapping/crashing ------
-extreme = bank_notes(0, "Major", BANK_MAX, transpose=999)
-check("transpose clamps at the top", all(n == 127 for n in extreme))
-extreme = bank_notes(0, "Major", BANK_MIN, transpose=-999)
-check("transpose clamps at the bottom", all(n == 0 for n in extreme))
+# -- arp: tap-tempo interval math -------------------------------------------
+check("bpm_from_tap_interval(0.5s) == 120", bpm_from_tap_interval(0.5) == 120.0)
+check("bpm_from_tap_interval(1.0s) == 60", bpm_from_tap_interval(1.0) == 60.0)
+check("bpm_from_tap_interval clamps absurdly fast taps", bpm_from_tap_interval(0.01) == 300)
+check("bpm_from_tap_interval clamps absurdly slow taps", bpm_from_tap_interval(10.0) == 20)
+check("bpm_from_tap_interval(0) is None (no divide-by-zero)", bpm_from_tap_interval(0) is None)
+check("step_interval_s(120bpm, 2 steps/beat) == 0.25s", step_interval_s(120, 2) == 0.25)
 
-# -- notes: bank offset clamp never escapes its own declared range ---------
-check("bank offset clamps above", clamp_bank_offset(999) == BANK_MAX)
-check("bank offset clamps below", clamp_bank_offset(-999) == BANK_MIN)
+# -- arp: next_up_index cycles through however many notes are active right
+# now, and never raises even if the pool shrank between steps --------------
+check("next_up_index wraps at the end", next_up_index(2, 3) == 0)
+check("next_up_index advances by one", next_up_index(0, 3) == 1)
+check("next_up_index handles length 0 without raising", next_up_index(5, 0) == 0)
+idx = -1
+seen = []
+for _ in range(6):
+    idx = next_up_index(idx, 3)
+    seen.append(idx)
+check("next_up_index cycles 0,1,2,0,1,2 from -1", seen == [0, 1, 2, 0, 1, 2])
 
 # -- params: exactly 9 of them, one per manipulation key --------------------
 check("exactly 9 params", len(PARAMS) == 9)

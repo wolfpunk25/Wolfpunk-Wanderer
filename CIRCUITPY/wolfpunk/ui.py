@@ -70,13 +70,10 @@ class UI:
                 border = y == 0 or y == bmp.height - 1
                 bmp[x, y] = 1 if (border or x < filled) else 0
 
-    def render_idle(self, root_name, scale_name, bank_note_names, latched, channel, flash=""):
+    def render_idle(self, root_name, scale_name, pool_note_names, bpm, channel, flash=""):
         self.line1.text = f"{root_name} {scale_name}"[:21]
-        notes_text = " ".join(
-            f"*{n}*" if on else n for n, on in zip(bank_note_names, latched)
-        )
-        self.line2.text = notes_text[:21]
-        self.line3.text = (flash if flash else f"ch{channel}")[:21]
+        self.line2.text = (" ".join(pool_note_names) if pool_note_names else "-- no notes --")[:21]
+        self.line3.text = (flash if flash else f"{int(bpm)}bpm ch{channel}")[:21]
         self._draw_bar(0.0)
         self.bar_tile.hidden = True
 
@@ -90,7 +87,7 @@ class UI:
         self.bar_tile.hidden = False
         self._draw_bar(normalized(param, value))
 
-    def leds(self, bank_colors, latched, values, held_manip_idx, flash=False):
+    def leds(self, key_active, key_playing, values, held_manip_idx, flash=False):
         px = self.macropad.pixels
         if flash:
             for i in range(12):
@@ -99,8 +96,13 @@ class UI:
             return
 
         for i, key in enumerate(NOTE_KEYS):
-            base = bank_colors[i]
-            px[key] = base if latched[i] else _scale_rgb(base, 0.12)
+            base = degree_color(i)  # KEY_DEGREES are the fixed 0,1,2 - color per key never moves
+            if key_playing[i]:
+                px[key] = base  # full brightness: this is the arp's current step
+            elif key_active[i]:
+                px[key] = _scale_rgb(base, 0.4)
+            else:
+                px[key] = _scale_rgb(base, 0.08)
 
         for i, key in enumerate(MANIP_KEYS):
             param, value = values[i]
